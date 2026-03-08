@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>实体书排版：星月之梦 - PDF导出原型</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
+  
+  <style>
+    /* 基础重置防闪烁 */
+    body { margin: 0; padding: 0; background-color: #eef1f5; }
+    
+    /* 滚动条美化 */
+    .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(143, 164, 184, 0.4); border-radius: 20px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: rgba(143, 164, 184, 0.7); }
+    
+    /* 针对 PDF 导出的防截断和换页样式 */
+    .avoid-break { page-break-inside: avoid; break-inside: avoid; }
+    .page-break { page-break-before: always; }
+    
+    /* 淡入动画 */
+    @keyframes fadeIn { 
+      from { opacity: 0; transform: translateY(6px); } 
+      to { opacity: 1; transform: translateY(0); } 
+    }
+    .animate-fade-in { animation: fadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.292.0"
+      }
+    }
+  </script>
+
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel" data-type="module">
+    import React, { useState, useEffect, useMemo, useRef } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { Settings, Copy, Check, MessageSquare, TerminalSquare, Edit3, Sparkles, FileText, Image as ImageIcon } from 'lucide-react';
+
+    // 默认占位文本，加入了 引言 和 章节标记(##)
+    const DEFAULT_LOG = `## Chapter 1：觉醒于阿喀琉斯
+kp：在一个最坏的时代，最奢侈的东西会是什么？
+kp：当你望向历史的车轮——当它洪流般倾轧过芸芸众生，而世人趋之若鹜的钱权、名誉、欢乐、性命在其上不得一丝痕迹时，奢侈的定义就如此式微而简单：
+kp：仅仅是确保自己还能见到第二天的太阳，在1920的美国就如此伟大。
+kp：······
+kp：你已然记不清自己有多久没有做过一场梦了，更别说是一场好梦。头痛欲裂地在自己的蜗居里醒来，你只觉得周身都好似被车轮碾过了一般四分五裂。脑子突突地跳着，只回荡着一种激情的余韵，它在告诉你——在你睡觉的时候，一定遭遇了一件大事。
+卡洛伊·梅洛蒂：原想继续眼睛这么一闭一睡了之但显然身体传来的不妙感无法令人如愿了，挣扎着睁开眼起身，望向窗外判断天色
+
+## Chapter 2：命运的掷骰
+kp：天光大亮，楼下车流如织，显然地，今日世界末日依旧没来得及把阿喀琉斯这座城市轰得稀巴烂。但这对你来说不是一件好事——因为你睡过头了！
+卡洛伊·梅洛蒂：……呵呵！看来崭新的一天从事不遂顺人愿开始，既然如此就不着急了，慢悠悠洗漱穿衣
+.ra侦查
+骰子：卡洛伊·梅洛蒂>准备好，我要摇咯——
+通透可爱的玻璃罐中"侦查"的星星糖转动，最终停在
+ D100=79/60 【失败】
+啊——这一定是我的失误！要不要再来一次？！
+kp：可怜的门被你撞开了一条缝隙，于是你已经分不清是撞得头痛，还是发烧得头痛了，不过你看到了坐在屋子里的家伙。
+卡洛伊·梅洛蒂：晕乎乎的……好像在踩棉花噢！但是……好难受。下意识想要去找最信赖的人。
+.ra体质
+骰子：卡洛伊·梅洛蒂的"体质"检定结果为: 没问题没问题——接下来就交给命运吧！看我的~ D100=63/40 从今往后命运将不会交给全能的神！ 【失败】`;
+
+    // 自定义复用的 SVG 组件：四芒星
+    const StarSymbol = ({ className }) => (
+      <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+        <path d="M12 0C12 6.627 17.373 12 24 12C17.373 12 12 17.373 12 24C12 17.373 6.627 12 0 12C6.627 12 12 6.627 12 0Z" />
+      </svg>
+    );
+
+    // 自定义复用的 SVG 组件：新月
+    const MoonSymbol = ({ className }) => (
+      <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+      </svg>
+    );
+
+    function App() {
+      const [rawText, setRawText] = useState(DEFAULT_LOG);
+      const [copied, setCopied] = useState(false);
+      const previewRef = useRef(null);
+
+      // 书籍排版自定义设置
+      const [settings, setSettings] = useState({
+        titleLine1: '这是名为爱与希望',
+        titleLine2: '的故事。',
+        subtitle: '《阿喀琉斯之梦》',
+        quote: '我们在深渊的边缘安营扎寨，\n只是为了在黎明到来时，能第一眼看见那束照进现实的微光。',
+        kpName: 'kp', 
+        showDice: true,
+        showTOC: true, 
+      });
+
+      // 动态加载 html2pdf.js 用于导出多页 PDF
+      useEffect(() => {
+        if (!window.html2pdf) {
+          const script = document.createElement('script');
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+          script.async = true;
+          document.body.appendChild(script);
+        }
+      }, []);
+
+      // 解析日志
+      const parsedLogs = useMemo(() => {
+        const lines = rawText.split('\n');
+        let rawParsed = [];
+        let currentLog = null;
+        let idCounter = 0;
+
+        const kpAliases = settings.kpName.split(',').map(s => s.trim().toLowerCase());
+
+        lines.forEach((line) => {
+          const trimmedLine = line.trim();
+          if (!trimmedLine) return;
+
+          if (trimmedLine.startsWith('##')) {
+            if (currentLog) { rawParsed.push(currentLog); currentLog = null; }
+            rawParsed.push({
+              id: idCounter++,
+              type: 'chapter',
+              speaker: 'System',
+              message: trimmedLine.replace(/^##\s*/, '')
+            });
+            return;
+          }
+
+          if (trimmedLine.startsWith('.') || trimmedLine.startsWith('。')) {
+            if (currentLog) { rawParsed.push(currentLog); currentLog = null; }
+            rawParsed.push({
+              id: idCounter++,
+              type: 'command',
+              speaker: 'System',
+              message: trimmedLine
+            });
+            return;
+          }
+
+          const match = trimmedLine.match(/^([^：:]+)[:：](.*)$/);
+          if (match) {
+            if (currentLog) { rawParsed.push(currentLog); }
+            const speaker = match[1].trim();
+            const message = match[2].trim();
+            let type = 'player';
+            
+            if (speaker.includes('骰子') || speaker.includes('Dice') || speaker.toLowerCase().includes('bot') || speaker.toLowerCase().includes('罗玛尼')) {
+              type = 'dice';
+            } else if (kpAliases.includes(speaker.toLowerCase())) {
+              type = 'kp';
+            }
+
+            currentLog = { id: idCounter++, type, speaker, message };
+          } else {
+            if (currentLog) {
+              currentLog.message += '\n' + line;
+            } else {
+              currentLog = { id: idCounter++, type: 'system', speaker: 'System', message: line };
+            }
+          }
+        });
+        if (currentLog) rawParsed.push(currentLog);
+
+        let finalResult = [];
+        let lastPlayerSpeaker = 'Unknown';
+
+        for (let i = 0; i < rawParsed.length; i++) {
+          let log = rawParsed[i];
+
+          if (log.type === 'player' || log.type === 'kp') {
+            lastPlayerSpeaker = log.speaker;
+          }
+
+          if (log.type === 'chapter') {
+            finalResult.push(log);
+          }
+          else if (log.type === 'command' && rawParsed[i + 1] && rawParsed[i + 1].type === 'dice') {
+            const diceLog = rawParsed[i + 1];
+            const resultMatch = diceLog.message.match(/【(.*?)】/);
+            const diceResult = resultMatch ? resultMatch[1] : '掷骰';
+
+            finalResult.push({
+              id: log.id,
+              type: 'dice_group',
+              commandSpeaker: lastPlayerSpeaker,
+              command: log.message,
+              diceSpeaker: diceLog.speaker,
+              diceMessage: diceLog.message,
+              result: diceResult
+            });
+            i++; 
+          } 
+          else if (log.type === 'dice') {
+            const resultMatch = log.message.match(/【(.*?)】/);
+            finalResult.push({
+              id: log.id,
+              type: 'dice_group',
+              commandSpeaker: '',
+              command: '',
+              diceSpeaker: log.speaker,
+              diceMessage: log.message,
+              result: resultMatch ? resultMatch[1] : '掷骰'
+            });
+          } 
+          else {
+            let lastFinal = finalResult[finalResult.length - 1];
+            if (lastFinal && lastFinal.speaker === log.speaker && lastFinal.type === log.type && log.type !== 'command' && log.type !== 'chapter') {
+              lastFinal.message += '\n\n' + log.message;
+            } else {
+              finalResult.push({ ...log });
+            }
+          }
+        }
+
+        if (!settings.showDice) {
+          finalResult = finalResult.filter(log => log.type !== 'dice_group' && log.type !== 'command');
+        }
+
+        return finalResult;
+      }, [rawText, settings]);
+
+      const chapters = useMemo(() => parsedLogs.filter(log => log.type === 'chapter'), [parsedLogs]);
+
+      // 罗马数字转换辅助函数
+      const toRoman = (num) => {
+        const roman = ["I","II","III","IV","V","VI","VII","VIII","IX","X","XI","XII"];
+        return roman[num - 1] || num;
+      };
+
+      const copyToMarkdown = () => {
+        const markdown = parsedLogs.map(log => {
+          if (log.type === 'chapter') return `\n### ✦ ${log.message} ✦\n`;
+          if (log.type === 'dice_group') return `> **<${log.commandSpeaker}>** ${log.command}\n> **<${log.diceSpeaker}>** ${log.diceMessage.replace(/\n/g, ' ')}\n> —— *${log.result}* ——`;
+          if (log.type === 'command') return `\`${log.message}\``;
+          return `**<${log.speaker}>**\n${log.message}`;
+        }).join('\n\n');
+
+        const textarea = document.createElement('textarea');
+        textarea.value = markdown;
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+          document.execCommand('copy');
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+          console.error('Failed to copy', err);
+        }
+        document.body.removeChild(textarea);
+      };
+
+      // 导出为真正的 PDF 书籍
+      const exportPDF = () => {
+        if (!previewRef.current || !window.html2pdf) {
+          alert("PDF 组件尚未加载完成，请稍候再试。");
+          return;
+        }
+        const element = previewRef.current;
+        
+        // html2pdf 配置
+        const opt = {
+          margin:       [10, 0, 10, 0], // 上下留白，左右依赖 HTML 自身 padding
+          filename:     `${settings.subtitle.replace(/[《》]/g, '')}_跑团剧本.pdf`,
+          image:        { type: 'jpeg', quality: 0.98 },
+          html2canvas:  { scale: 2, useCORS: true, letterRendering: true },
+          jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+          pagebreak:    { mode: ['css', 'legacy'] } // 依赖我们的 page-break css
+        };
+
+        window.html2pdf().set(opt).from(element).save();
+      };
+
+      return (
+        <div className="min-h-screen flex flex-col bg-[#eef1f5] text-slate-800 font-sans">
+          
+          {/* 顶部导航 */}
+          <header className="p-4 shadow-sm flex justify-between items-center bg-white border-b border-[#e1e8ef] z-10 relative">
+            <div className="flex items-center space-x-3">
+              <Sparkles className="w-5 h-5 text-[#8fa4b8]" />
+              <h1 className="text-xl font-bold tracking-wider text-[#5c7792]">实体书排版：星月之梦</h1>
+            </div>
+          </header>
+
+          {/* 主体布局 */}
+          <main className="flex-1 flex flex-col lg:flex-row p-4 gap-6 overflow-hidden">
+            
+            {/* 左侧：输入与设置 */}
+            <section className="lg:w-1/3 flex flex-col gap-4 rounded-xl p-5 shadow-sm bg-white border border-[#e1e8ef] flex-shrink-0 z-10">
+              <div className="flex items-center space-x-2 font-semibold text-[#5c7792]">
+                <TerminalSquare className="w-5 h-5 text-[#8fa4b8]" />
+                <h2>原始文本输入</h2>
+                <span className="text-xs text-[#8fa4b8] font-normal ml-auto bg-[#f4f7fa] px-2 py-1 rounded border border-[#e1e8ef]">提示：用 ## 标记章节</span>
+              </div>
+              <textarea
+                className="flex-1 w-full p-3 rounded-lg border border-[#e1e8ef] bg-[#f8fafc] focus:ring-2 focus:ring-[#c2d3e0] focus:border-[#a4bacc] resize-none font-mono text-[13px] leading-relaxed text-[#5c7792] custom-scrollbar outline-none transition-all"
+                placeholder="将跑团聊天记录粘贴在这里...\n\n支持使用 ## 章节名 来生成目录和自动分页换章"
+                value={rawText}
+                onChange={(e) => setRawText(e.target.value)}
+              />
+
+              <div className="border-t pt-4 border-[#e1e8ef]">
+                <div className="flex items-center space-x-2 font-semibold mb-4 text-[#5c7792]">
+                  <Edit3 className="w-5 h-5 text-[#8fa4b8]" />
+                  <h2>书籍参数设置</h2>
+                </div>
+                
+                <div className="space-y-4 text-sm">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs text-[#8fa4b8]">主标题行1</label>
+                      <input type="text" value={settings.titleLine1} onChange={(e) => setSettings({...settings, titleLine1: e.target.value})} className="px-3 py-1.5 rounded border border-[#e1e8ef] bg-white text-[#5c7792] outline-none focus:border-[#a4bacc]" />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs text-[#8fa4b8]">主标题行2 (书名)</label>
+                      <input type="text" value={settings.titleLine2} onChange={(e) => setSettings({...settings, titleLine2: e.target.value})} className="px-3 py-1.5 rounded border border-[#e1e8ef] bg-white text-[#5c7792] outline-none focus:border-[#a4bacc]" />
+                    </div>
+                    <div className="flex flex-col gap-1 col-span-2">
+                      <label className="text-xs text-[#8fa4b8]">书籍卷首语 / 引言</label>
+                      <textarea rows="2" value={settings.quote} onChange={(e) => setSettings({...settings, quote: e.target.value})} className="px-3 py-1.5 rounded border border-[#e1e8ef] bg-white text-[#5c7792] outline-none focus:border-[#a4bacc] resize-none text-xs" />
+                    </div>
+                  </div>
+
+                  <div className="pt-2 flex flex-col gap-3 border-t border-[#e1e8ef] mt-2">
+                    <div className="flex items-center justify-between mt-2">
+                      <label className="flex items-center space-x-2 cursor-pointer group">
+                        <input type="checkbox" checked={settings.showTOC} onChange={(e) => setSettings({...settings, showTOC: e.target.checked})} className="rounded text-[#8fa4b8] focus:ring-[#c2d3e0] border-[#d2dde6]" />
+                        <span className="text-[#6b859e] group-hover:text-[#4a5a6a] transition-colors">生成扉页目录</span>
+                      </label>
+                      <label className="flex items-center space-x-2 cursor-pointer group">
+                        <input type="checkbox" checked={settings.showDice} onChange={(e) => setSettings({...settings, showDice: e.target.checked})} className="rounded text-[#8fa4b8] focus:ring-[#c2d3e0] border-[#d2dde6]" />
+                        <span className="text-[#6b859e] group-hover:text-[#4a5a6a] transition-colors">保留掷骰记录</span>
+                      </label>
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <label className="text-[#6b859e]">KP名称识别 (用于高亮)</label>
+                      <input type="text" value={settings.kpName} onChange={(e) => setSettings({...settings, kpName: e.target.value})} className="px-3 py-1.5 w-32 rounded border border-[#e1e8ef] bg-white text-[#5c7792] text-right outline-none focus:border-[#a4bacc]" placeholder="如: kp, dm" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* 右侧：预览区 */}
+            <section className="lg:w-2/3 flex flex-col rounded-xl shadow-sm border border-[#e1e8ef] bg-white overflow-hidden relative">
+              <div className="p-3 border-b border-[#e1e8ef] bg-[#fcfdfd] flex justify-between items-center z-20 relative">
+                <span className="font-semibold flex items-center space-x-2 text-[#5c7792]">
+                  <FileText className="w-5 h-5 text-[#8fa4b8]" />
+                  <span>A4 纸页预览模式</span>
+                </span>
+                <div className="flex space-x-3">
+                  <button onClick={copyToMarkdown} className={`flex items-center space-x-1 px-4 py-1.5 rounded-md text-sm transition font-medium ${copied ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-white text-[#5c7792] border border-[#e1e8ef] hover:bg-[#f4f7fa]'}`}>
+                    {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    <span>{copied ? '已复刻' : '复制文本'}</span>
+                  </button>
+                  <button onClick={exportPDF} className="flex items-center space-x-1 px-4 py-1.5 rounded-md text-sm bg-[#8fa4b8] text-white hover:bg-[#7a91a6] transition shadow-sm font-medium">
+                    <FileText className="w-4 h-4" />
+                    <span>导出成 PDF</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 滚动容器：背景为深灰色桌面，内容为 A4 宽度的纸张 */}
+              <div className="flex-1 overflow-y-auto bg-[#d9e1e8] p-6 md:p-10 custom-scrollbar relative">
+                
+                {/* A4 纸张容器：宽度固定为 794px，完美映射 A4 打印 */}
+                <div 
+                  ref={previewRef} 
+                  className="mx-auto bg-white shadow-2xl relative overflow-hidden"
+                  style={{ 
+                    width: '794px', // A4 纸像素宽 (96dpi)
+                    minHeight: '1123px', // A4 纸像素高
+                    fontFamily: '"Noto Serif SC", "Songti SC", "SimSun", serif', // 全局衬线体
+                  }}
+                >
+                  
+                  {/* ==================== 1. 封面页 (Cover Page) ==================== */}
+                  <div className="relative flex flex-col justify-center items-center px-16 text-center avoid-break" style={{ height: '1123px' }}>
+                    {/* 封面背景修饰 */}
+                    <div className="absolute top-[-5%] right-[-5%] w-[400px] h-[400px] bg-[#ebf0f5] opacity-60 blur-[80px] pointer-events-none rounded-full"></div>
+                    <div className="absolute bottom-[10%] left-[-10%] w-[500px] h-[500px] bg-[#ebf0f5] opacity-50 blur-[100px] pointer-events-none rounded-full"></div>
+                    
+                    <MoonSymbol className="absolute top-32 right-32 w-48 h-48 text-[#d9e3eb] opacity-30 pointer-events-none rotate-[-15deg]" />
+                    <StarSymbol className="absolute bottom-40 left-32 w-16 h-16 text-[#d9e3eb] opacity-40 pointer-events-none" />
+
+                    <div className="z-10 w-full">
+                      <div className="text-[#9caebf] tracking-[0.5em] text-base mb-6 flex items-center justify-center">
+                        <StarSymbol className="w-3 h-3 mr-3 text-[#b8c9d6]" />
+                        {settings.titleLine1}
+                        <StarSymbol className="w-3 h-3 ml-3 text-[#b8c9d6]" />
+                      </div>
+                      <div className="text-[#4a5a6a] text-6xl font-bold tracking-[0.2em] mb-12 py-8 border-y border-[#e1e8ef] inline-block w-full">
+                        {settings.titleLine2}
+                      </div>
+                      <div className="text-[#8fa4b8] text-xl tracking-[0.4em] italic mt-4">
+                        {settings.subtitle}
+                      </div>
+                    </div>
+
+                    {settings.quote && (
+                      <div className="absolute bottom-32 w-[70%] z-10">
+                        <div className="p-8 border-[1px] border-[#e1e8ef] bg-white/80 relative">
+                          <StarSymbol className="absolute -top-3 -left-3 w-6 h-6 text-[#c2d3e0] bg-white" />
+                          <StarSymbol className="absolute -bottom-3 -right-3 w-6 h-6 text-[#c2d3e0] bg-white" />
+                          <p className="text-[#6b859e] italic tracking-widest leading-loose whitespace-pre-wrap text-[14px]">
+                            {settings.quote}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* 强制换页标记：在 PDF 生成时会将下面内容顶到新一页 */}
+                  <div className="html2pdf__page-break" style={{ pageBreakBefore: 'always', height: 0 }}></div>
+
+                  {/* ==================== 2. 目录页 (TOC Page) ==================== */}
+                  {settings.showTOC && chapters.length > 0 && (
+                    <div className="relative pt-24 px-20 pb-16 avoid-break" style={{ minHeight: '1123px' }}>
+                      <div className="text-center mb-16">
+                        <h3 className="text-3xl font-bold text-[#8fa4b8] tracking-[0.5em] mb-4 flex items-center justify-center">
+                          <StarSymbol className="w-5 h-5 mr-4 text-[#b8c9d6]" />
+                          INDEX
+                          <StarSymbol className="w-5 h-5 ml-4 text-[#b8c9d6]" />
+                        </h3>
+                        <div className="w-16 h-[2px] bg-[#d2dde6] mx-auto"></div>
+                      </div>
+                      
+                      <ul className="space-y-8 px-8">
+                        {chapters.map((chap, idx) => (
+                          <li key={`toc-${idx}`} className="flex items-end text-[#5c7792] tracking-widest text-[16px]">
+                            <span className="text-[#8fa4b8] font-serif w-20">Chap. {toRoman(idx + 1)}</span>
+                            <span className="font-medium text-[#4a5a6a]">{chap.message}</span>
+                            <div className="flex-1 border-b-[1.5px] border-dotted border-[#c2d3e0] mx-4 mb-1.5"></div>
+                            <StarSymbol className="w-3 h-3 text-[#d2dde6] mb-1" />
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* 强制换页标记 */}
+                  {settings.showTOC && chapters.length > 0 && (
+                     <div className="html2pdf__page-break" style={{ pageBreakBefore: 'always', height: 0 }}></div>
+                  )}
+
+                  {/* ==================== 3. 正文页 (Content) ==================== */}
+                  <div className="px-16 pt-16 pb-24 relative z-10 bg-white min-h-[1123px]">
+                    
+                    <div className="space-y-8">
+                      {parsedLogs.length === 0 ? (
+                        <div className="text-center text-[#9caebf] py-20 font-sans tracking-widest">请在左侧输入记录</div>
+                      ) : (
+                        parsedLogs.map((log, index) => (
+                          <div key={log.id} className={`text-[15px] ${log.type === 'chapter' ? '' : 'avoid-break'}`}>
+                            
+                            {/* 章节标题渲染：如果是章节，自动触发一页新纸 (除了第一页) */}
+                            {log.type === 'chapter' && (
+                              <>
+                                {/* 如果不是正文的第一个元素，则在章节前插入换页符 */}
+                                {index !== 0 && <div className="html2pdf__page-break" style={{ pageBreakBefore: 'always', height: 0 }}></div>}
+                                
+                                <div className={`flex flex-col items-center justify-center text-center ${index !== 0 ? 'pt-24' : ''} mb-16 avoid-break`}>
+                                  <div className="flex items-center justify-center space-x-3 mb-6 text-[#b8c9d6]">
+                                    <StarSymbol className="w-4 h-4" />
+                                    <MoonSymbol className="w-8 h-8" />
+                                    <StarSymbol className="w-4 h-4" />
+                                  </div>
+                                  <h2 className="text-3xl font-bold text-[#4a5a6a] tracking-[0.2em]">{log.message}</h2>
+                                  <div className="flex items-center mt-8 w-32">
+                                    <div className="flex-1 h-[1px] bg-[#d2dde6]"></div>
+                                    <StarSymbol className="w-3 h-3 text-[#d2dde6] mx-3" />
+                                    <div className="flex-1 h-[1px] bg-[#d2dde6]"></div>
+                                  </div>
+                                </div>
+                              </>
+                            )}
+
+                            {/* 普通对话 */}
+                            {(log.type === 'player' || log.type === 'kp') && (
+                              <div className="flex items-stretch">
+                                <div className="w-32 flex-shrink-0 text-right text-[#829ab1] tracking-wider pt-[3px] pr-6 select-none font-medium">
+                                  &lt;{log.speaker}&gt;
+                                </div>
+                                <div className="w-[1.5px] bg-[#e1e8ef] flex-shrink-0 mt-1 self-stretch rounded-full relative">
+                                   {log.type === 'kp' && <StarSymbol className="absolute -top-1 -left-[3px] w-2 h-2 text-[#b8c9d6]" />}
+                                </div>
+                                <div className="flex-1 pl-8 text-[#334e68] leading-[2] whitespace-pre-wrap text-justify">
+                                  {log.message}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 沉浸式掷骰框 */}
+                            {log.type === 'dice_group' && (
+                              <div className="mt-8 mb-8 ml-[150px] relative">
+                                <div className="bg-[#f7f9fc] border border-[#e6edf2] p-6 rounded-md relative text-[#5c7792] text-[14px] leading-relaxed">
+                                  <MoonSymbol className="absolute -bottom-8 -right-6 w-32 h-32 text-[#d9e3eb] opacity-40 rotate-[-15deg] pointer-events-none" />
+                                  <StarSymbol className="absolute bottom-4 right-16 w-4 h-4 text-[#cdd8e4] opacity-80 pointer-events-none" />
+                                  
+                                  {log.command && (
+                                    <div className="mb-3 relative z-10">
+                                      <span className="text-[#8fa4b8] mr-3 font-medium">&lt;{log.commandSpeaker}&gt;</span>
+                                      <span>{log.command}</span>
+                                    </div>
+                                  )}
+                                  <div className="relative z-10">
+                                    <span className="text-[#8fa4b8] mr-3 font-medium">&lt;{log.diceSpeaker}&gt;</span>
+                                    <span className="whitespace-pre-wrap">{log.diceMessage}</span>
+                                  </div>
+                                </div>
+                                
+                                <div className="flex items-center justify-center mt-6">
+                                  <div className="h-[1px] bg-[#d2dde6] w-1/5"></div>
+                                  <StarSymbol className="w-2 h-2 text-[#c2d3e0] mx-3" />
+                                  <span className="mx-2 text-[#7a94ad] tracking-widest text-[15px] italic font-medium">
+                                    {log.result}
+                                  </span>
+                                  <StarSymbol className="w-2 h-2 text-[#c2d3e0] mx-3" />
+                                  <div className="h-[1px] bg-[#d2dde6] w-1/5"></div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 孤立的系统指令 */}
+                            {log.type === 'command' && (
+                              <div className="flex items-start opacity-50">
+                                <div className="w-32 flex-shrink-0 text-right pr-6 pt-[3px]"></div>
+                                <div className="w-[1.5px] bg-transparent flex-shrink-0" />
+                                <div className="flex-1 pl-8 font-mono text-[13px] tracking-widest text-[#9caebf]">
+                                  {log.message}
+                                </div>
+                              </div>
+                            )}
+
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    
+                    {/* 终章结语装饰 */}
+                    {parsedLogs.length > 0 && (
+                      <div className="mt-32 pt-12 text-center text-[#8fa4b8] font-serif text-sm tracking-widest relative z-10 flex flex-col items-center avoid-break">
+                        <div className="flex items-center space-x-3 mb-6 text-[#d2dde6]">
+                          <StarSymbol className="w-4 h-4" />
+                          <MoonSymbol className="w-8 h-8" />
+                          <StarSymbol className="w-4 h-4" />
+                        </div>
+                        <div className="flex items-center space-x-6">
+                          <div className="w-12 h-[1px] bg-[#d2dde6]"></div>
+                          <span className="text-lg">THE END</span>
+                          <div className="w-12 h-[1px] bg-[#d2dde6]"></div>
+                        </div>
+                      </div>
+                    )}
+
+                  </div>
+                </div>
+              </div>
+            </section>
+          </main>
+        </div>
+      );
+    }
+
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
